@@ -1,8 +1,9 @@
+use dialoguer::{Confirm, MultiSelect};
+use owo_colors::OwoColorize;
 use serde_json::Value;
-use std::process::Command;
 use std::env;
 use std::path::Path;
-use dialoguer::{MultiSelect, Confirm};
+use std::process::Command;
 
 struct SimCleanerCLI {
     devices: Vec<Device>,
@@ -40,7 +41,12 @@ impl SimCleanerCLI {
     }
 
     fn navigate_to_device_directory(&self) {
-        env::set_current_dir(dirs::home_dir().unwrap().join("Library/Developer/CoreSimulator/Devices/")).unwrap();
+        env::set_current_dir(
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Developer/CoreSimulator/Devices/"),
+        )
+        .unwrap();
     }
 
     fn get_device_data(&mut self) {
@@ -52,36 +58,79 @@ impl SimCleanerCLI {
             .output()
             .expect("Failed to execute command");
         let devices_json: Value = serde_json::from_slice(&output.stdout).unwrap();
-        self.devices = devices_json["devices"].as_object().unwrap().iter().flat_map(|(runtime, device_list)| {
-            device_list.as_array().unwrap().iter().map(move |device| Device {
-                name: device["name"].as_str().unwrap().to_string(),
-                state: device["state"].as_str().unwrap().to_string(),
-                udid: device["udid"].as_str().unwrap().to_string(),
-                device_type: device["deviceTypeIdentifier"].as_str().unwrap().to_string(),
-                runtime: runtime.clone(),
+        self.devices = devices_json["devices"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .flat_map(|(runtime, device_list)| {
+                device_list
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(move |device| Device {
+                        name: device["name"].as_str().unwrap().to_string(),
+                        state: device["state"].as_str().unwrap().to_string(),
+                        udid: device["udid"].as_str().unwrap().to_string(),
+                        device_type: device["deviceTypeIdentifier"].as_str().unwrap().to_string(),
+                        runtime: runtime.clone(),
+                    })
             })
-        }).collect();
+            .collect();
     }
 
     fn parse_runtime(&self, device_index: usize) -> String {
-        self.devices[device_index].runtime.split('.').last().unwrap().to_string()
+        self.devices[device_index]
+            .runtime
+            .split('.')
+            .last()
+            .unwrap()
+            .to_string()
     }
 
     fn get_target_devices(&mut self) {
-        let choices: Vec<(String, usize)> = self.devices.iter().enumerate().map(|(index, device)| {
-            let size = self.get_device_image_size(&device.udid);
-            let runtime = self.parse_runtime(index);
-            (format!("{:<30} {:<15} {:<10} {}", device.name, runtime, device.state, size), index)
-        }).collect();
+        let choices: Vec<(String, usize)> = self
+            .devices
+            .iter()
+            .enumerate()
+            .map(|(index, device)| {
+                let size = self.get_device_image_size(&device.udid);
+                let runtime = self.parse_runtime(index);
+                (
+                    format!(
+                        "{:<30} {:<15} {:<10} {}",
+                        device.name, runtime, device.state, size
+                    ),
+                    index,
+                )
+            })
+            .collect();
 
         let selections = MultiSelect::new()
-            .items(&choices.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>())
-            .interact()
+            .with_prompt(
+                "[↑↓] navigate, [space] un/select, [enter] submit, [q] quit"
+                    .blue()
+                    .to_string(),
+            )
+            .items(
+                &choices
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .interact_opt()
             .unwrap();
 
-        self.victims = selections.iter().map(|&i| choices[i].1).collect();
-        if self.victims.is_empty() {
-            std::process::exit(0);
+        match selections {
+            Some(sel) => {
+                self.victims = sel.iter().map(|&i| choices[i].1).collect();
+                if self.victims.is_empty() {
+                    std::process::exit(0);
+                }
+            }
+            None => {
+                // Pressed `q`/`esc` - built in to interact_opt()
+                std::process::exit(0);
+            }
         }
     }
 
@@ -95,7 +144,11 @@ impl SimCleanerCLI {
     fn recreate_devices(&self) {
         self.navigate_to_device_directory();
         for &index in &self.victims {
-            println!("  {} [{}]...", self.devices[index].name, self.parse_runtime(index));
+            println!(
+                "  {} [{}]...",
+                self.devices[index].name,
+                self.parse_runtime(index)
+            );
             Command::new("xcrun")
                 .arg("simctl")
                 .arg("create")
@@ -109,7 +162,11 @@ impl SimCleanerCLI {
 
     fn delete_device_data(&self) {
         for &index in &self.victims {
-            println!("  {} [{}]...", self.devices[index].name, self.parse_runtime(index));
+            println!(
+                "  {} [{}]...",
+                self.devices[index].name,
+                self.parse_runtime(index)
+            );
             Command::new("xcrun")
                 .arg("simctl")
                 .arg("delete")
